@@ -6,6 +6,7 @@
 #define CHANNEL_LIMIT 2
 #define IN_BANDWIDTH 0 /* Unlimited */
 #define OUT_BANDWIDTH 0 /* Unlimited */
+#define TIMEOUT 3600
 
 int main(int argc, char **argv)
 {
@@ -20,7 +21,8 @@ int main(int argc, char **argv)
 
     ENetEvent event;
 
-    for (int v = enet_host_service(server, &event, timeout); v > 0; ) {
+    int v;
+    for (v = enet_host_service(server, &event, TIMEOUT); v > 0; ) {
         switch (event.type) {
         case ENET_EVENT_TYPE_CONNECT: {
             printf("Client connected from %x:%u.\n", event.peer->address.host, event.peer->address.port);
