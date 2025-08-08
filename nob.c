@@ -6,7 +6,7 @@
 #define SRC_FOLDER   "src/"
 #define INCLUDE      "include/"
 
-#define PROJECT_NAME "tcpchat"
+#define PROJECT_NAME "chat"
 
 int main(int argc, char **argv)
 {
@@ -21,5 +21,14 @@ int main(int argc, char **argv)
         "-o", BUILD_FOLDER"server", 
         "-I", INCLUDE,
         SRC_FOLDER"server.c");
+    if (!nob_cmd_run_sync(cmd)) return 1;
+
+    cmd.count = 0;
+    nob_cmd_append(&cmd,
+        "cc", 
+        "-Wall", "-Wextra", 
+        "-o", BUILD_FOLDER"client", 
+        "-I", INCLUDE,
+        SRC_FOLDER"client.c");
     if (!nob_cmd_run_sync(cmd)) return 1;
 }
