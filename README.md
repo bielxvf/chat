@@ -1,2 +1,2 @@
-# tcpchat
+# chat
 TCP chat
