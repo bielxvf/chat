@@ -4,7 +4,6 @@
 
 #define BUILD_FOLDER "build/"
 #define SRC_FOLDER   "src/"
-#define INCLUDE      "include/"
 
 #define PROJECT_NAME "chat"
 
@@ -19,8 +18,8 @@ int main(int argc, char **argv)
         "cc", 
         "-Wall", "-Wextra", 
         "-o", BUILD_FOLDER"server", 
-        "-I", INCLUDE,
-        SRC_FOLDER"server.c");
+        SRC_FOLDER"server.c",
+        "-ltask");
     if (!nob_cmd_run_sync(cmd)) return 1;
 
     cmd.count = 0;
@@ -28,7 +27,7 @@ int main(int argc, char **argv)
         "cc", 
         "-Wall", "-Wextra", 
         "-o", BUILD_FOLDER"client", 
-        "-I", INCLUDE,
-        SRC_FOLDER"client.c");
+        SRC_FOLDER"client.c",
+        "-ltask");
     if (!nob_cmd_run_sync(cmd)) return 1;
 }
