@@ -19,7 +19,7 @@ int main(int argc, char **argv)
         "-Wall", "-Wextra", 
         "-o", BUILD_FOLDER"server", 
         SRC_FOLDER"server.c",
-        "-ltask");
+        "-levent");
     if (!nob_cmd_run_sync(cmd)) return 1;
 
     cmd.count = 0;
@@ -28,6 +28,6 @@ int main(int argc, char **argv)
         "-Wall", "-Wextra", 
         "-o", BUILD_FOLDER"client", 
         SRC_FOLDER"client.c",
-        "-ltask");
+        "-levent");
     if (!nob_cmd_run_sync(cmd)) return 1;
 }

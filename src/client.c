@@ -1,6 +1,7 @@
+#include <event2/event.h>
 #include <stdio.h>
 
-void taskmain(int argc, char **argv)
+int main(int argc, char **argv)
 {
-    taskexit(0);
+    return 0;
 }
