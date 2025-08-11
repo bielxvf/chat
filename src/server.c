@@ -30,7 +30,7 @@ struct server_ctx {
     struct client_ctx *clients; /* First of the linked list */
 };
 
-_Thread_local size_t client_count = 0;
+static size_t client_count = 0;
 
 void add_client(struct server_ctx *server, struct client_ctx *client)
 {
@@ -52,7 +52,7 @@ void remove_client(struct server_ctx *server, struct client_ctx *client)
     for (
         struct client_ctx **p = &server->clients;
         *p != NULL;
-        p = &((*p)->next)
+        p = &((*p)->next) /* TODO: Ugly code. */
     ) {
         if (*p == client) {
             *p = client->next;
@@ -86,7 +86,7 @@ void broadcast_message(
     char *msg_header;
     char ipstr[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &(sender->addr.sin_addr), ipstr, INET_ADDRSTRLEN);
-    asprintf(&msg_header, "\e[0;34m(%s)\e[0m:\e[0;30m(%d)\e[0m ", ipstr, ntohs(sender->addr.sin_port));
+    asprintf(&msg_header, "(%s):(%d) ", ipstr, ntohs(sender->addr.sin_port));
 
     for (
         struct client_ctx *client = server->clients;
@@ -96,7 +96,7 @@ void broadcast_message(
         if (client != sender) {
             bufferevent_write(client->bev, msg_header, strlen(msg_header));
         } else {
-            char *youstr = "\e[0;34m(YOU)\e[0m ";
+            char *youstr = "(YOU) ";
             bufferevent_write(client->bev, youstr, strlen(youstr));
         }
         bufferevent_write(client->bev, s, len);
@@ -131,13 +131,25 @@ void event_cb(struct bufferevent *bev, short events, void *ctx)
     if (events & (BEV_EVENT_EOF | BEV_EVENT_ERROR)) {
         char ipstr[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &(client->addr.sin_addr), ipstr, INET_ADDRSTRLEN);
+        uint16_t port = ntohs(client->addr.sin_port);
         printf(
             "Connection closed: %s:%d\n",
             ipstr,
-            ntohs(client->addr.sin_port)
+            port
         );
         remove_client(server, client);
-        printf("Number of clients connected: %ld\n", client_count);
+
+        char *dcstr;
+        asprintf(&dcstr, "\e[0;34m(%s)\e[0m:\e[0;30m(%d)\e[0m has left the chat.\n", ipstr, port);
+        for (
+            struct client_ctx *client = server->clients;
+            client != NULL;
+            client = client->next
+        ) {
+            bufferevent_write(client->bev, dcstr, strlen(dcstr));
+        }
+        free(dcstr);
+        printf("Number of clients connected: %zu\n", client_count);
     }
 }
 
@@ -161,7 +173,6 @@ void accept_cb(
         return;
     }
 
-    add_client(server, client);
     client->bev = bufferevent_socket_new(server->base, fd, BEV_OPT_CLOSE_ON_FREE);
     if (client->bev == NULL) {
         fprintf(
@@ -170,20 +181,37 @@ void accept_cb(
             strerror(errno)
         );
         event_base_loopbreak(server->base);
-        free(client);
         return;
     }
+    add_client(server, client);
 
     memcpy(&client->addr, addr, sizeof(client->addr));
     char ipstr[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &(client->addr.sin_addr), ipstr, INET_ADDRSTRLEN);
+    uint16_t port = ntohs(client->addr.sin_port);
     printf(
         "New connection from %s:%d\n",
         ipstr,
-        ntohs(client->addr.sin_port)
+        port
     );
 
     printf("Number of clients connected: %ld\n", client_count);
+
+    char *connstr;
+    asprintf(&connstr, "(%s):(%d) has joined the chat.\n", ipstr, port);
+    char *youstr = "(YOU) have joined the chat.\n";
+    for (
+        struct client_ctx *it = server->clients;
+        it != NULL;
+        it = it->next
+    ) {
+        if (it != client) {
+            bufferevent_write(it->bev, connstr, strlen(connstr));
+        } else {
+            bufferevent_write(it->bev, youstr, strlen(youstr));
+        }
+    }
+    free(connstr);
     bufferevent_setcb(client->bev, read_cb, NULL, event_cb, client);
     bufferevent_enable(client->bev, EV_READ | EV_WRITE);
 }
@@ -199,12 +227,12 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    size_t port = 0;
-    if (sscanf(argv[2], "%zu", &port) <= 0) {
+    uint16_t port = 0;
+    if (sscanf(argv[2], "%hu", &port) <= 0) {
         fprintf(
             stderr,
             "Error: Could not parse '%s' into a size_t\n",
-            argv[1]
+            argv[2]
         );
     }
 
@@ -213,7 +241,7 @@ int main(int argc, char **argv)
         fprintf(
             stderr,
             "Error: Could not parse '%s' into a size_t\n",
-            argv[2]
+            argv[3]
         );
     }
 
