@@ -1,3 +1,4 @@
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,6 +12,7 @@
 
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sys/socket.h>
 
 struct server_ctx;
 
@@ -27,7 +29,7 @@ struct server_ctx {
     struct client_ctx *clients;
 };
 
-size_t client_count = 0;
+_Thread_local size_t client_count = 0;
 
 void add_client(struct server_ctx *server, struct client_ctx *client)
 {
@@ -35,6 +37,7 @@ void add_client(struct server_ctx *server, struct client_ctx *client)
     client->server = server;
     client->next = server->clients;
     server->clients = client;
+    client_count++;
 }
 
 void remove_client(struct server_ctx *server, struct client_ctx *client)
@@ -69,7 +72,7 @@ void broadcast_message(
 {
     size_t len = evbuffer_get_length(msg);
     if (len == 0) return;
-    char *s = malloc(len + 1);
+    char *s = malloc(len);
     if (s == NULL) {
         fprintf(
             stderr,
@@ -79,20 +82,28 @@ void broadcast_message(
         return;
     }
     evbuffer_remove(msg, s, len);
-    
+    char *msg_header;
+    char ipstr[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &(sender->addr.sin_addr), ipstr, INET_ADDRSTRLEN);
+    asprintf(&msg_header, "%s:%d SAYS: ", ipstr, ntohs(sender->addr.sin_port));
+
     for (
         struct client_ctx *client = server->clients;
         client != NULL;
         client = client->next
     ) {
         if (client != sender) {
-            bufferevent_write(client->bev, s, len);
+            bufferevent_write(client->bev, msg_header, strlen(msg_header));
+        } else {
+            bufferevent_write(client->bev, "YOU: ", 5);
         }
+        bufferevent_write(client->bev, s, len);
     }
+
+    free(msg_header);
     free(s);
 }
 
-/* Read from client + do whatever */
 void read_cb(struct bufferevent *bev, void *ctx)
 {
     struct client_ctx *client = ctx;
@@ -116,14 +127,15 @@ void event_cb(struct bufferevent *bev, short events, void *ctx)
     }
 
     if (events & (BEV_EVENT_EOF | BEV_EVENT_ERROR)) {
+        char ipstr[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &(client->addr.sin_addr), ipstr, INET_ADDRSTRLEN);
         printf(
             "Connection closed: %s:%d\n",
-            inet_ntoa(client->addr.sin_addr),
+            ipstr,
             ntohs(client->addr.sin_port)
         );
         remove_client(server, client);
-        bufferevent_free(bev);
-        free(client);
+        printf("Number of clients connected: %ld\n", client_count);
     }
 }
 
@@ -136,7 +148,7 @@ void accept_cb(
     void *ctx
 )
 {
-    struct event_base *base = ctx;
+    struct server_ctx *server = ctx;
     struct client_ctx *client = malloc(sizeof(struct client_ctx));
     if (client == NULL) {
         fprintf(
@@ -147,35 +159,62 @@ void accept_cb(
         return;
     }
 
-    client->bev = bufferevent_socket_new(base, fd, BEV_OPT_CLOSE_ON_FREE);
+    add_client(server, client);
+    client->bev = bufferevent_socket_new(server->base, fd, BEV_OPT_CLOSE_ON_FREE);
     if (client->bev == NULL) {
         fprintf(
             stderr,
             "Error creating bufferevent: %s.\n",
             strerror(errno)
         );
-        event_base_loopbreak(base);
+        event_base_loopbreak(server->base);
         free(client);
         return;
     }
 
     memcpy(&client->addr, addr, sizeof(client->addr));
-    printf("New connection from %s:%d\n",
-            inet_ntoa(client->addr.sin_addr),
-                ntohs(client->addr.sin_port)
+    char ipstr[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &(client->addr.sin_addr), ipstr, INET_ADDRSTRLEN);
+    printf(
+        "New connection from %s:%d\n",
+        ipstr,
+        ntohs(client->addr.sin_port)
     );
 
-    client_count++;
     printf("Number of clients connected: %ld\n", client_count);
     bufferevent_setcb(client->bev, read_cb, NULL, event_cb, client);
     bufferevent_enable(client->bev, EV_READ | EV_WRITE);
 }
 
-#define PORT 8484 /* TODO: cmdline argument */
-#define MAX_CLIENTS 1024  /* TODO: cmdline argument */
-
 int main(int argc, char **argv)
 {
+    if (argc != 4) {
+        fprintf(
+            stderr,
+            "Usage: %s <ip> <port> <max_clients>\n",
+            argv[0]
+        );
+        return 1;
+    }
+
+    size_t port = 0;
+    if (sscanf(argv[2], "%zu", &port) <= 0) {
+        fprintf(
+            stderr,
+            "Error: Could not parse '%s' into a size_t\n",
+            argv[1]
+        );
+    }
+
+    size_t max_clients = 0;
+    if (sscanf(argv[3], "%zu", &max_clients) <= 0) {
+        fprintf(
+            stderr,
+            "Error: Could not parse '%s' into a size_t\n",
+            argv[2]
+        );
+    }
+
     struct server_ctx *server = malloc(sizeof(struct server_ctx));
     if (server == NULL) {
         fprintf(stderr, "Error creating server context: %s.\n", strerror(errno));
@@ -193,15 +232,15 @@ int main(int argc, char **argv)
     struct sockaddr_in sin;
     memset(&sin, 0, sizeof(sin));
     sin.sin_family = AF_INET;
-    sin.sin_addr.s_addr = htonl(INADDR_ANY);
-    sin.sin_port = htons(PORT); /* TODO: cmdline argument */
+    inet_pton(AF_INET, argv[1], &(sin.sin_addr));
+    sin.sin_port = htons(port);
 
     server->listener = evconnlistener_new_bind(
             server->base,
             accept_cb,
-            server->base,
+            server,
             LEV_OPT_CLOSE_ON_FREE | LEV_OPT_REUSEABLE,
-            MAX_CLIENTS, /* TODO: cmdline argument */
+            max_clients,
             (struct sockaddr*) &sin,
             sizeof(sin)
     );
