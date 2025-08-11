@@ -16,6 +16,7 @@
 
 struct server_ctx;
 
+/* Linked list */
 struct client_ctx {
     struct bufferevent *bev;
     struct sockaddr_in addr;
@@ -26,7 +27,7 @@ struct client_ctx {
 struct server_ctx {
     struct event_base *base;
     struct evconnlistener *listener;
-    struct client_ctx *clients;
+    struct client_ctx *clients; /* First of the linked list */
 };
 
 _Thread_local size_t client_count = 0;
@@ -85,7 +86,7 @@ void broadcast_message(
     char *msg_header;
     char ipstr[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &(sender->addr.sin_addr), ipstr, INET_ADDRSTRLEN);
-    asprintf(&msg_header, "%s:%d SAYS: ", ipstr, ntohs(sender->addr.sin_port));
+    asprintf(&msg_header, "\e[0;34m(%s)\e[0m:\e[0;30m(%d)\e[0m ", ipstr, ntohs(sender->addr.sin_port));
 
     for (
         struct client_ctx *client = server->clients;
@@ -95,7 +96,8 @@ void broadcast_message(
         if (client != sender) {
             bufferevent_write(client->bev, msg_header, strlen(msg_header));
         } else {
-            bufferevent_write(client->bev, "YOU: ", 5);
+            char *youstr = "\e[0;34m(YOU)\e[0m ";
+            bufferevent_write(client->bev, youstr, strlen(youstr));
         }
         bufferevent_write(client->bev, s, len);
     }
